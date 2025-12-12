@@ -2,6 +2,7 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Inter, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
+import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister"
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -39,6 +40,7 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={`${inter.className} font-sans antialiased`}>
         {children}
+        <ServiceWorkerRegister />
         <Analytics />
       </body>
     </html>

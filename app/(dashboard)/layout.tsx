@@ -1,36 +1,70 @@
+"use client"
+
 import type React from "react"
-import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
+import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { MobileNav } from "@/components/dashboard/mobile-nav"
 import { Header } from "@/components/dashboard/header"
 
-export default async function DashboardLayout({
+type UserHeader = { email?: string | null; name?: string | null }
+
+export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const supabase = await createClient()
+  const router = useRouter()
+  const [isReady, setIsReady] = useState(false)
+  const [user, setUser] = useState<UserHeader | null>(null)
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
+  useEffect(() => {
+    const supabase = createClient()
 
-  if (error || !user) {
-    redirect("/auth/login")
+    // IMPORTANT: use getSession() so it works offline (it reads persisted session locally).
+    supabase.auth.getSession().then(({ data }) => {
+      const sessionUser = data.session?.user
+      if (!sessionUser) {
+        router.replace("/auth/login")
+        return
+      }
+      setUser({ email: sessionUser.email, name: (sessionUser.user_metadata as any)?.name })
+      setIsReady(true)
+    })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const sessionUser = session?.user
+      if (!sessionUser) {
+        setUser(null)
+        router.replace("/auth/login")
+        return
+      }
+      setUser({ email: sessionUser.email, name: (sessionUser.user_metadata as any)?.name })
+      setIsReady(true)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [router])
+
+  const headerUser = useMemo(() => {
+    if (!user) return { email: undefined, name: undefined }
+    return user
+  }, [user])
+
+  if (!isReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading...</div>
+    )
   }
 
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <div className="flex-1 flex flex-col lg:ml-0">
-        <Header
-          user={{
-            email: user.email,
-            name: user.user_metadata?.name,
-          }}
-        />
+        <Header user={headerUser} />
         <main className="flex-1 p-4 lg:p-6 pb-20 lg:pb-6">{children}</main>
         <MobileNav />
       </div>

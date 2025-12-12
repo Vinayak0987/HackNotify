@@ -1,5 +1,9 @@
-import { createClient } from "@/lib/supabase/server"
-import { redirect } from "next/navigation"
+"use client"
+
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
+import { getOfflineCache, setOfflineCache } from "@/lib/offline/cache"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { StatsCard } from "@/components/dashboard/stats-card"
@@ -8,70 +12,131 @@ import { TaskItem } from "@/components/dashboard/task-item"
 import { Trophy, CheckSquare, Clock, AlertTriangle, Plus, ArrowRight, Users } from "lucide-react"
 import Link from "next/link"
 import type { Hackathon, Task, Profile } from "@/lib/types"
+import { useOnlineStatus } from "@/lib/offline/online"
 
-export default async function DashboardPage() {
-  const supabase = await createClient()
+export default function DashboardPage() {
+  const router = useRouter()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) redirect("/auth/login")
+  const [isLoading, setIsLoading] = useState(true)
+  const [offlineInfo, setOfflineInfo] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
 
-  // Get user's teams
-  const { data: teamMembers } = await supabase.from("team_members").select("team_id").eq("user_id", user.id)
+  const [hackathons, setHackathons] = useState<Hackathon[]>([])
+  const [tasks, setTasks] = useState<(Task & { assignee: Profile | null })[]>([])
+  const [hasTeam, setHasTeam] = useState(true)
+  const [userName, setUserName] = useState<string | null>(null)
+  const { isOnline } = useOnlineStatus()
 
-  const teamIds = teamMembers?.map((tm) => tm.team_id) || []
-  const hasTeam = teamIds.length > 0
+  const fetchData = useCallback(async () => {
+    const supabase = createClient()
 
-  // Fetch data only if user has teams
-  let hackathons: Hackathon[] = []
-  let tasks: (Task & { assignee: Profile | null })[] = []
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
 
-  if (hasTeam) {
-    const { data: hackathonData } = await supabase
-      .from("hackathons")
-      .select("*")
-      .in("team_id", teamIds)
-      .order("submission_deadline", { ascending: true })
+    const user = session?.user
+    if (!user) {
+      router.replace("/auth/login")
+      return
+    }
 
-    hackathons = (hackathonData || []) as Hackathon[]
+    setUserId(user.id)
+    setUserName((user.user_metadata as any)?.name || null)
 
-    const { data: taskData } = await supabase
-      .from("tasks")
-      .select("*, assignee:assigned_to(id, name, email)")
-      .in("team_id", teamIds)
-      .order("deadline", { ascending: true })
+    try {
+      const { data: teamMembers } = await supabase.from("team_members").select("team_id").eq("user_id", user.id)
+      const teamIds = teamMembers?.map((tm) => tm.team_id) || []
+      const _hasTeam = teamIds.length > 0
+      setHasTeam(_hasTeam)
 
-    tasks = (taskData || []) as (Task & { assignee: Profile | null })[]
-  }
+      if (!_hasTeam) {
+        setHackathons([])
+        setTasks([])
+        setOfflineInfo(null)
+        return
+      }
+
+      const { data: hackathonData, error: hackError } = await supabase
+        .from("hackathons")
+        .select("*")
+        .in("team_id", teamIds)
+        .order("submission_deadline", { ascending: true })
+      if (hackError) throw hackError
+
+      const { data: taskData, error: taskError } = await supabase
+        .from("tasks")
+        .select("*, assignee:assigned_to(id, name, email)")
+        .in("team_id", teamIds)
+        .order("deadline", { ascending: true })
+      if (taskError) throw taskError
+
+      const hackList = (hackathonData || []) as Hackathon[]
+      const taskList = (taskData || []) as (Task & { assignee: Profile | null })[]
+
+      setHackathons(hackList)
+      setTasks(taskList)
+      setOfflineCache(user.id, "hackathons", hackList)
+      setOfflineCache(user.id, "tasks", taskList)
+      setOfflineInfo(null)
+    } catch {
+      const cachedHack = getOfflineCache<Hackathon[]>(user.id, "hackathons")
+      const cachedTasks = getOfflineCache<(Task & { assignee: Profile | null })[]>(user.id, "tasks")
+
+      if (cachedHack) setHackathons(cachedHack.value)
+      if (cachedTasks) setTasks(cachedTasks.value)
+
+      const at = cachedHack?.savedAt || cachedTasks?.savedAt
+      setOfflineInfo(at ? `Offline • showing cached data from ${at}` : "Offline • no cached data yet")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [router])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  const now = useMemo(() => new Date(), [])
 
   // Calculate stats
-  const now = new Date()
-  const upcomingDeadlines = hackathons.filter((h) => {
-    const regDeadline = h.reg_deadline ? new Date(h.reg_deadline) : null
-    const subDeadline = h.submission_deadline ? new Date(h.submission_deadline) : null
-    return (regDeadline && regDeadline > now) || (subDeadline && subDeadline > now)
-  })
-
-  const myTasks = tasks.filter((t) => t.assigned_to === user.id && t.status !== "done")
-  const overdueTasks = tasks.filter((t) => t.deadline && new Date(t.deadline) < now && t.status !== "done")
-  const completedTasks = tasks.filter((t) => t.status === "done")
-
-  // Get upcoming deadlines (next 7 days)
-  const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-  const urgentDeadlines = hackathons
-    .filter((h) => {
+  const upcomingDeadlines = useMemo(() => {
+    return hackathons.filter((h) => {
       const regDeadline = h.reg_deadline ? new Date(h.reg_deadline) : null
       const subDeadline = h.submission_deadline ? new Date(h.submission_deadline) : null
-      return (
-        (regDeadline && regDeadline > now && regDeadline <= sevenDaysFromNow) ||
-        (subDeadline && subDeadline > now && subDeadline <= sevenDaysFromNow)
-      )
+      return (regDeadline && regDeadline > now) || (subDeadline && subDeadline > now)
     })
-    .slice(0, 3)
+  }, [hackathons, now])
 
-  // Get my pending tasks
-  const pendingTasks = tasks.filter((t) => t.assigned_to === user.id && t.status !== "done").slice(0, 5)
+  const myTasks = useMemo(() => (userId ? tasks.filter((t) => t.assigned_to === userId && t.status !== "done") : []), [tasks, userId])
+  const overdueTasks = useMemo(() => tasks.filter((t) => t.deadline && new Date(t.deadline) < now && t.status !== "done"), [tasks, now])
+  const completedTasks = useMemo(() => tasks.filter((t) => t.status === "done"), [tasks])
+
+  const sevenDaysFromNow = useMemo(() => new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000), [now])
+
+  const urgentDeadlines = useMemo(() => {
+    return hackathons
+      .filter((h) => {
+        const regDeadline = h.reg_deadline ? new Date(h.reg_deadline) : null
+        const subDeadline = h.submission_deadline ? new Date(h.submission_deadline) : null
+        return (
+          (regDeadline && regDeadline > now && regDeadline <= sevenDaysFromNow) ||
+          (subDeadline && subDeadline > now && subDeadline <= sevenDaysFromNow)
+        )
+      })
+      .slice(0, 3)
+  }, [hackathons, now, sevenDaysFromNow])
+
+  const pendingTasks = useMemo(() => (userId ? tasks.filter((t) => t.assigned_to === userId && t.status !== "done").slice(0, 5) : []), [tasks, userId])
+
+  if (isLoading) {
+    return (
+      <div className="max-w-7xl mx-auto">
+        <Card>
+          <CardContent className="py-16 text-center text-muted-foreground">Loading dashboard...</CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   if (!hasTeam) {
     return (
@@ -116,17 +181,18 @@ export default async function DashboardPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground">Welcome back, {user.user_metadata?.name || "there"}!</p>
+          <p className="text-muted-foreground">Welcome back, {userName || "there"}!</p>
+          {offlineInfo && <p className="text-xs text-muted-foreground mt-1">{offlineInfo}</p>}
         </div>
         <div className="flex gap-2">
-          <Link href="/hackathons/new">
-            <Button variant="outline" size="sm" className="gap-2 bg-transparent">
+          <Link href="/hackathons/new" aria-disabled={!isOnline} tabIndex={!isOnline ? -1 : undefined}>
+            <Button variant="outline" size="sm" className="gap-2 bg-transparent" disabled={!isOnline}>
               <Plus className="w-4 h-4" />
               Add Hackathon
             </Button>
           </Link>
-          <Link href="/tasks/new">
-            <Button size="sm" className="gap-2">
+          <Link href="/tasks/new" aria-disabled={!isOnline} tabIndex={!isOnline ? -1 : undefined}>
+            <Button size="sm" className="gap-2" disabled={!isOnline}>
               <Plus className="w-4 h-4" />
               New Task
             </Button>

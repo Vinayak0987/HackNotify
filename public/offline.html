@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HackTrackr (Offline)</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 16px; background: #0b1020; color: #e6eefc; }
+      .card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 12px; margin: 12px 0; }
+      .muted { color: rgba(230,238,252,0.7); }
+      h1 { font-size: 18px; margin: 0 0 6px; }
+      h2 { font-size: 16px; margin: 0 0 8px; }
+      ul { padding-left: 18px; margin: 8px 0; }
+      a { color: #76e4ff; }
+      .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: rgba(118,228,255,0.15); border: 1px solid rgba(118,228,255,0.25); }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Offline mode</h1>
+      <div class="muted">You are offline. Showing last saved data from this device.</div>
+      <div style="margin-top:8px" class="pill" id="savedAt"></div>
+      <div style="margin-top:8px" class="muted">Reconnect to refresh data, then reopen the app.</div>
+    </div>
+
+    <div class="card">
+      <h2>Tasks</h2>
+      <div id="tasks" class="muted">No cached tasks found yet.</div>
+    </div>
+
+    <div class="card">
+      <h2>Hackathons</h2>
+      <div id="hackathons" class="muted">No cached hackathons found yet.</div>
+    </div>
+
+    <div class="card muted">
+      Tip: Open the app once while online so it can cache pages and data.
+    </div>
+
+    <script>
+      (function () {
+        function getLatest(prefix) {
+          // Find the newest cached payload across users.
+          var newest = null
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i)
+            if (!k || k.indexOf(prefix) !== 0) continue
+            try {
+              var v = JSON.parse(localStorage.getItem(k) || 'null')
+              if (!v || !v.savedAt) continue
+              if (!newest || v.savedAt > newest.savedAt) newest = v
+            } catch (e) {}
+          }
+          return newest
+        }
+
+        var tasksPayload = getLatest('hacktrackr.offline.v1.')
+        // We store per-user keys; pick the latest tasks/hackathons individually.
+        function getLatestBySuffix(suffix) {
+          var newest = null
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i)
+            if (!k || k.indexOf('hacktrackr.offline.v1.') !== 0) continue
+            if (k.lastIndexOf('.' + suffix) !== k.length - (suffix.length + 1)) continue
+            try {
+              var v = JSON.parse(localStorage.getItem(k) || 'null')
+              if (!v || !v.savedAt) continue
+              if (!newest || v.savedAt > newest.savedAt) newest = v
+            } catch (e) {}
+          }
+          return newest
+        }
+
+        var tasks = getLatestBySuffix('tasks')
+        var hacks = getLatestBySuffix('hackathons')
+        var savedAt = document.getElementById('savedAt')
+        var at = (tasks && tasks.savedAt) || (hacks && hacks.savedAt)
+        savedAt.textContent = at ? ('Last saved: ' + at) : 'No cached data yet'
+
+        function renderList(targetId, items, titleKey) {
+          var el = document.getElementById(targetId)
+          if (!items || !items.length) return
+          var html = '<ul>'
+          for (var i = 0; i < Math.min(items.length, 50); i++) {
+            var it = items[i]
+            html += '<li>' + (it[titleKey] || '(untitled)') + '</li>'
+          }
+          html += '</ul>'
+          el.className = ''
+          el.innerHTML = html
+        }
+
+        renderList('tasks', tasks && tasks.value, 'title')
+        renderList('hackathons', hacks && hacks.value, 'title')
+      })()
+    </script>
+  </body>
+</html>

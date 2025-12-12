@@ -31,6 +31,31 @@ export default function LoginPage() {
         password,
       })
       if (error) throw error
+
+      // Ensure Server Components see the updated auth cookies.
+      router.refresh()
+
+      // Pre-cache core routes right after login so offline works without manual visiting.
+      try {
+        if ("serviceWorker" in navigator) {
+          const reg = await navigator.serviceWorker.ready
+          reg.active?.postMessage({
+            type: "PRECACHE_URLS",
+            urls: [
+              "/",
+              "/dashboard",
+              "/tasks",
+              "/hackathons",
+              "/calendar",
+              "/team",
+              "/settings",
+            ],
+          })
+        }
+      } catch {
+        // ignore
+      }
+
       router.push("/dashboard")
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred")

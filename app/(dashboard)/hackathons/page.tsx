@@ -1,5 +1,9 @@
-import { createClient } from "@/lib/supabase/server"
-import { redirect } from "next/navigation"
+"use client"
+
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
+import { getOfflineCache, setOfflineCache } from "@/lib/offline/cache"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -8,44 +12,95 @@ import Link from "next/link"
 import { format, isPast, isFuture, formatDistanceToNow } from "date-fns"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import type { Hackathon } from "@/lib/types"
+import { useOnlineStatus } from "@/lib/offline/online"
 
-export default async function HackathonsPage() {
-  const supabase = await createClient()
+export default function HackathonsPage() {
+  const router = useRouter()
+  const [hackathonList, setHackathonList] = useState<Hackathon[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [offlineInfo, setOfflineInfo] = useState<string | null>(null)
+  const { isOnline } = useOnlineStatus()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) redirect("/auth/login")
+  const fetchHackathons = useCallback(async () => {
+    const supabase = createClient()
 
-  // Get user's teams
-  const { data: teamMembers } = await supabase.from("team_members").select("team_id").eq("user_id", user.id)
+    // Use local session so this still works offline (if a previous session exists).
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
 
-  const teamIds = teamMembers?.map((tm) => tm.team_id) || []
+    const user = session?.user
+    if (!user) {
+      router.replace("/auth/login")
+      return
+    }
 
-  if (teamIds.length === 0) {
-    redirect("/dashboard")
+    try {
+      const { data: teamMembers } = await supabase.from("team_members").select("team_id").eq("user_id", user.id)
+      const teamIds = teamMembers?.map((tm) => tm.team_id) || []
+
+      if (teamIds.length === 0) {
+        setHackathonList([])
+        setIsLoading(false)
+        return
+      }
+
+      const { data: hackathons, error } = await supabase
+        .from("hackathons")
+        .select("*")
+        .in("team_id", teamIds)
+        .order("submission_deadline", { ascending: true })
+
+      if (error) throw error
+
+      const list = (hackathons || []) as Hackathon[]
+      setHackathonList(list)
+      setOfflineCache(user.id, "hackathons", list)
+      setOfflineInfo(null)
+    } catch {
+      // Offline or network error: show cached data if present.
+      const cached = getOfflineCache<Hackathon[]>(user.id, "hackathons")
+      if (cached) {
+        setHackathonList(cached.value)
+        setOfflineInfo(`Offline • showing cached data from ${cached.savedAt}`)
+      } else {
+        setHackathonList([])
+        setOfflineInfo("Offline • no cached hackathons yet")
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }, [router])
+
+  useEffect(() => {
+    fetchHackathons()
+  }, [fetchHackathons])
+
+  const now = useMemo(() => new Date(), [])
+
+  const upcoming = useMemo(() => {
+    return hackathonList.filter((h) => {
+      const subDeadline = h.submission_deadline ? new Date(h.submission_deadline) : null
+      return subDeadline && isFuture(subDeadline)
+    })
+  }, [hackathonList])
+
+  const past = useMemo(() => {
+    return hackathonList.filter((h) => {
+      const subDeadline = h.submission_deadline ? new Date(h.submission_deadline) : null
+      return subDeadline && isPast(subDeadline)
+    })
+  }, [hackathonList])
+
+  if (isLoading) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <Card>
+          <CardContent className="py-16 text-center text-muted-foreground">Loading hackathons...</CardContent>
+        </Card>
+      </div>
+    )
   }
-
-  // Fetch hackathons
-  const { data: hackathons } = await supabase
-    .from("hackathons")
-    .select("*")
-    .in("team_id", teamIds)
-    .order("submission_deadline", { ascending: true })
-
-  const hackathonList = (hackathons || []) as Hackathon[]
-  const now = new Date()
-
-  // Categorize hackathons
-  const upcoming = hackathonList.filter((h) => {
-    const subDeadline = h.submission_deadline ? new Date(h.submission_deadline) : null
-    return subDeadline && isFuture(subDeadline)
-  })
-
-  const past = hackathonList.filter((h) => {
-    const subDeadline = h.submission_deadline ? new Date(h.submission_deadline) : null
-    return subDeadline && isPast(subDeadline)
-  })
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -54,9 +109,10 @@ export default async function HackathonsPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Hackathons</h1>
           <p className="text-muted-foreground">Track all your hackathon deadlines</p>
+          {offlineInfo && <p className="text-xs text-muted-foreground mt-1">{offlineInfo}</p>}
         </div>
-        <Link href="/hackathons/new">
-          <Button className="gap-2">
+        <Link href="/hackathons/new" aria-disabled={!isOnline} tabIndex={!isOnline ? -1 : undefined}>
+          <Button className="gap-2" disabled={!isOnline}>
             <Plus className="w-4 h-4" />
             Add Hackathon
           </Button>
@@ -157,7 +213,9 @@ function HackathonCard({ hackathon, isPast = false }: { hackathon: Hackathon; is
                   <Link href={`/hackathons/${hackathon.id}`}>Open Command Center</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href={`/hackathons/${hackathon.id}/edit`}>Edit Details</Link>
+                  <Link href={`/hackathons/${hackathon.id}/edit`} aria-disabled={!isOnline} tabIndex={!isOnline ? -1 : undefined}>
+                    <span className={!isOnline ? "pointer-events-none opacity-50" : ""}>Edit Details</span>
+                  </Link>
                 </DropdownMenuItem>
                 {hackathon.link && (
                   <DropdownMenuItem asChild>

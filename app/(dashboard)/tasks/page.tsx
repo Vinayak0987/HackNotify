@@ -11,6 +11,8 @@ import { Plus, CheckSquare, User, Calendar, MoreVertical, GripVertical } from "l
 import Link from "next/link"
 import { formatDistanceToNow, isPast } from "date-fns"
 import { cn } from "@/lib/utils"
+import { getOfflineCache, setOfflineCache } from "@/lib/offline/cache"
+import { useOnlineStatus } from "@/lib/offline/online"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import type { Task, Profile } from "@/lib/types"
 import {
@@ -47,6 +49,7 @@ export default function TasksPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [view, setView] = useState<"list" | "board">("board")
   const [userId, setUserId] = useState<string | null>(null)
+  const { isOnline } = useOnlineStatus()
 
   // DnD State
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -54,29 +57,48 @@ export default function TasksPage() {
   const fetchTasks = useCallback(async () => {
     const supabase = createClient()
 
+    // Use local session so this still works offline (if a previous session exists).
     const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return
-    setUserId(user.id)
+      data: { session },
+    } = await supabase.auth.getSession()
 
-    const { data: teamMembers } = await supabase.from("team_members").select("team_id").eq("user_id", user.id)
-
-    const teamIds = teamMembers?.map((tm) => tm.team_id) || []
-
-    if (teamIds.length === 0) {
+    const user = session?.user
+    if (!user) {
       setIsLoading(false)
       return
     }
 
-    const { data: taskData } = await supabase
-      .from("tasks")
-      .select("*, assignee:assigned_to(id, name, email)")
-      .in("team_id", teamIds)
-      .order("created_at", { ascending: false })
+    setUserId(user.id)
 
-    setTasks((taskData || []) as TaskWithAssignee[])
-    setIsLoading(false)
+    try {
+      const { data: teamMembers } = await supabase.from("team_members").select("team_id").eq("user_id", user.id)
+      const teamIds = teamMembers?.map((tm) => tm.team_id) || []
+
+      if (teamIds.length === 0) {
+        setIsLoading(false)
+        return
+      }
+
+      const { data: taskData, error } = await supabase
+        .from("tasks")
+        .select("*, assignee:assigned_to(id, name, email)")
+        .in("team_id", teamIds)
+        .order("created_at", { ascending: false })
+
+      if (error) throw error
+
+      const list = (taskData || []) as TaskWithAssignee[]
+      setTasks(list)
+      setOfflineCache(user.id, "tasks", list)
+    } catch {
+      // Offline or network error: show cached data if present.
+      const cached = getOfflineCache<TaskWithAssignee[]>(user.id, "tasks")
+      if (cached) {
+        setTasks(cached.value)
+      }
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -84,6 +106,8 @@ export default function TasksPage() {
   }, [fetchTasks])
 
   const updateTaskStatus = async (taskId: string, newStatus: "todo" | "doing" | "done") => {
+    if (!isOnline) return
+
     const supabase = createClient()
 
     // Optimistic update
@@ -206,8 +230,8 @@ export default function TasksPage() {
               <TabsTrigger value="list">List</TabsTrigger>
             </TabsList>
           </Tabs>
-          <Link href="/tasks/new">
-            <Button className="gap-2">
+          <Link href="/tasks/new" aria-disabled={!isOnline} tabIndex={!isOnline ? -1 : undefined}>
+            <Button className="gap-2" disabled={!isOnline}>
               <Plus className="w-4 h-4" />
               New Task
             </Button>
@@ -238,9 +262,9 @@ export default function TasksPage() {
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
+          onDragStart={isOnline ? handleDragStart : undefined}
+          onDragOver={isOnline ? handleDragOver : undefined}
+          onDragEnd={isOnline ? handleDragEnd : undefined}
         >
           <div className="grid md:grid-cols-3 gap-4">
             <TaskColumn
@@ -420,7 +444,9 @@ function TaskCard({
                   <Link href={`/tasks/${task.id}`}>View Details</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href={`/tasks/${task.id}/edit`}>Edit</Link>
+                  <Link href={`/tasks/${task.id}/edit`} aria-disabled={!isOnline} tabIndex={!isOnline ? -1 : undefined}>
+                    <span className={!isOnline ? "pointer-events-none opacity-50" : ""}>Edit</span>
+                  </Link>
                 </DropdownMenuItem>
                 {onStatusChange && (
                   <>
