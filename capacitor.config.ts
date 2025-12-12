@@ -9,7 +9,7 @@ const config: CapacitorConfig = {
   // 1) Run `npm run dev`
   // 2) The Android emulator can reach your machine's localhost via 10.0.2.2
   server: {
-    url: 'http://192.168.0.106:3000',
+    url: 'https://hacktrackr.vercel.app',
     cleartext: true,
   },
 
