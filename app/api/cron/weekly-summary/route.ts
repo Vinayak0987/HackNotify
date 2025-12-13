@@ -44,7 +44,10 @@ export async function GET(request: Request) {
 
       if (!teamMember?.team) continue
 
-      const team = teamMember.team as { id: string; name: string }
+      const teamRaw = (teamMember as any).team
+      const team = Array.isArray(teamRaw) ? teamRaw[0] : teamRaw
+
+      if (!team?.id || !team?.name) continue
 
       // Stats for the past week
       const { count: tasksCompleted } = await supabase

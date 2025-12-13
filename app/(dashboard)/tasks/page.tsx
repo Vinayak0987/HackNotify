@@ -273,6 +273,7 @@ export default function TasksPage() {
               tasks={todoTasks}
               status="todo"
               id="todo"
+              isOnline={isOnline}
             />
             <TaskColumn
               title="In Progress"
@@ -280,6 +281,7 @@ export default function TasksPage() {
               tasks={doingTasks}
               status="doing"
               id="doing"
+              isOnline={isOnline}
             />
             <TaskColumn
               title="Done"
@@ -287,11 +289,12 @@ export default function TasksPage() {
               tasks={doneTasks}
               status="done"
               id="done"
+              isOnline={isOnline}
             />
           </div>
           <DragOverlay>
             {activeId && activeTask ? (
-              <TaskCard task={activeTask} />
+              <TaskCard task={activeTask} isOnline={isOnline} />
             ) : null}
           </DragOverlay>
         </DndContext>
@@ -326,12 +329,14 @@ function TaskColumn({
   tasks,
   status,
   id,
+  isOnline,
 }: {
   title: string
   count: number
   tasks: TaskWithAssignee[]
   status: "todo" | "doing" | "done"
   id: string
+  isOnline: boolean
 }) {
   const bgColors = {
     todo: "bg-muted/30",
@@ -348,7 +353,7 @@ function TaskColumn({
       <SortableContext items={tasks.map(t => t.id)} strategy={rectSortingStrategy}>
         <div className="space-y-3 flex-1">
           {tasks.map((task) => (
-            <SortableTaskCard key={task.id} task={task} />
+            <SortableTaskCard key={task.id} task={task} isOnline={isOnline} />
           ))}
           {tasks.length === 0 && (
             <div className="text-center py-8 text-sm text-muted-foreground bg-background/20 rounded border border-dashed border-border/50">
@@ -377,7 +382,7 @@ function DroppableZone({ id }: { id: string }) {
   )
 }
 
-function SortableTaskCard({ task }: { task: TaskWithAssignee }) {
+function SortableTaskCard({ task, isOnline }: { task: TaskWithAssignee; isOnline: boolean }) {
   const {
     attributes,
     listeners,
@@ -395,7 +400,7 @@ function SortableTaskCard({ task }: { task: TaskWithAssignee }) {
 
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <TaskCard task={task} />
+      <TaskCard task={task} isOnline={isOnline} />
     </div>
   )
 }
@@ -403,9 +408,11 @@ function SortableTaskCard({ task }: { task: TaskWithAssignee }) {
 
 function TaskCard({
   task,
+  isOnline,
   onStatusChange, // Optional now since we use DnD mostly, but can still keep for fallback/menu
 }: {
   task: TaskWithAssignee
+  isOnline: boolean
   onStatusChange?: (id: string, status: "todo" | "doing" | "done") => void
 }) {
   const isOverdue = task.deadline && isPast(new Date(task.deadline)) && task.status !== "done"

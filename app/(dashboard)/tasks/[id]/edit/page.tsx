@@ -65,8 +65,14 @@ export default function EditTaskPage() {
         .select("user_id, profiles:user_id(id, name, email)")
         .eq("team_id", taskData.team_id)
 
-      const profiles = members?.map((m) => m.profiles).filter(Boolean) as Profile[]
-      setTeamMembers(profiles || [])
+      const profiles = ((members as any[]) || [])
+        .map((m) => {
+          const raw = (m as any).profiles
+          return Array.isArray(raw) ? raw[0] : raw
+        })
+        .filter((p): p is Profile => Boolean(p))
+
+      setTeamMembers(profiles)
 
       setFormData({
         title: taskData.title,

@@ -39,7 +39,7 @@ type ResourceLink = {
 
 type TeamMember = {
     user_id: string
-    profiles: Profile
+    profiles: Profile | null
 }
 
 export default function HackathonDetailsPage() {
@@ -86,7 +86,17 @@ export default function HackathonDetailsPage() {
                     .select("user_id, profiles(*)")
                     .eq("team_id", h.team_id)
 
-                setTeamMembers((team || []) as TeamMember[])
+                const normalized = ((team as any[]) || []).map((m) => {
+                    const raw = (m as any).profiles
+                    const profile = Array.isArray(raw) ? raw[0] : raw
+
+                    return {
+                        user_id: (m as any).user_id,
+                        profiles: (profile ?? null) as Profile | null,
+                    } satisfies TeamMember
+                })
+
+                setTeamMembers(normalized)
             }
 
         } catch (error) {
@@ -285,17 +295,23 @@ export default function HackathonDetailsPage() {
                         </CardHeader>
                         <CardContent>
                             <div className="space-y-4">
-                                {teamMembers.map((tm) => (
-                                    <div key={tm.user_id} className="flex items-center gap-3">
-                                        <Avatar>
-                                            <AvatarFallback>{tm.profiles.name?.slice(0, 2).toUpperCase()}</AvatarFallback>
-                                        </Avatar>
-                                        <div>
-                                            <p className="font-medium text-sm">{tm.profiles.name}</p>
-                                            <p className="text-xs text-muted-foreground">{tm.profiles.job_title || "Hacker"}</p>
+                                {teamMembers.map((tm) => {
+                                    const name = tm.profiles?.name || "Unknown"
+                                    const initials = (name.slice(0, 2) || "??").toUpperCase()
+                                    const roleLabel = tm.profiles?.role === "admin" ? "Admin" : "Member"
+
+                                    return (
+                                        <div key={tm.user_id} className="flex items-center gap-3">
+                                            <Avatar>
+                                                <AvatarFallback>{initials}</AvatarFallback>
+                                            </Avatar>
+                                            <div>
+                                                <p className="font-medium text-sm">{name}</p>
+                                                <p className="text-xs text-muted-foreground">{roleLabel}</p>
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    )
+                                })}
                                 <div className="pt-2">
                                     <Link href="/team">
                                         <Button variant="ghost" size="sm" className="w-full text-muted-foreground">Manage Team</Button>

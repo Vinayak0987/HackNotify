@@ -1,7 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Calendar, ExternalLink } from "lucide-react"
-import { formatDistanceToNow, isPast, isToday, isTomorrow } from "date-fns"
+import { formatDistanceToNow, isPast, isToday, isTomorrow, isValid } from "date-fns"
 import Link from "next/link"
 import type { Hackathon } from "@/lib/types"
 
@@ -16,6 +16,7 @@ export function DeadlineCard({ hackathon, deadlineType }: DeadlineCardProps) {
   if (!deadline) return null
 
   const deadlineDate = new Date(deadline)
+  if (!isValid(deadlineDate)) return null
   const isOverdue = isPast(deadlineDate)
   const isDueToday = isToday(deadlineDate)
   const isDueTomorrow = isTomorrow(deadlineDate)

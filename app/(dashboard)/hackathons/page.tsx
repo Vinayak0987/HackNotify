@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Trophy, Calendar, ExternalLink, Bell, BellOff, MoreVertical } from "lucide-react"
 import Link from "next/link"
-import { format, isPast, isFuture, formatDistanceToNow } from "date-fns"
+import { format, isPast, isFuture, formatDistanceToNow, isValid } from "date-fns"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import type { Hackathon } from "@/lib/types"
 import { useOnlineStatus } from "@/lib/offline/online"
@@ -145,7 +145,7 @@ export default function HackathonsPage() {
               <h2 className="text-lg font-semibold text-foreground mb-4">Upcoming ({upcoming.length})</h2>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {upcoming.map((hackathon) => (
-                  <HackathonCard key={hackathon.id} hackathon={hackathon} />
+                  <HackathonItem key={hackathon.id} hackathon={hackathon} />
                 ))}
               </div>
             </section>
@@ -157,7 +157,7 @@ export default function HackathonsPage() {
               <h2 className="text-lg font-semibold text-muted-foreground mb-4">Past ({past.length})</h2>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {past.map((hackathon) => (
-                  <HackathonCard key={hackathon.id} hackathon={hackathon} isPast />
+                  <HackathonItem key={hackathon.id} hackathon={hackathon} isPast />
                 ))}
               </div>
             </section>
@@ -168,7 +168,8 @@ export default function HackathonsPage() {
   )
 }
 
-function HackathonCard({ hackathon, isPast = false }: { hackathon: Hackathon; isPast?: boolean }) {
+function HackathonItem({ hackathon, isPast = false }: { hackathon: Hackathon; isPast?: boolean }) {
+  const { isOnline } = useOnlineStatus()
   const now = new Date()
   const regDeadline = hackathon.reg_deadline ? new Date(hackathon.reg_deadline) : null
   const subDeadline = hackathon.submission_deadline ? new Date(hackathon.submission_deadline) : null
@@ -231,14 +232,19 @@ function HackathonCard({ hackathon, isPast = false }: { hackathon: Hackathon; is
       </CardHeader>
       <CardContent className="space-y-3">
         {/* Dates */}
-        {hackathon.start_date && hackathon.end_date && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Calendar className="w-4 h-4" />
-            <span>
-              {format(new Date(hackathon.start_date), "MMM d")} - {format(new Date(hackathon.end_date), "MMM d, yyyy")}
-            </span>
-          </div>
-        )}
+        {hackathon.start_date && hackathon.end_date && (() => {
+          const start = new Date(hackathon.start_date)
+          const end = new Date(hackathon.end_date)
+          if (!isValid(start) || !isValid(end)) return null
+          return (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Calendar className="w-4 h-4" />
+              <span>
+                {format(start, "MMM d")} - {format(end, "MMM d, yyyy")}
+              </span>
+            </div>
+          )
+        })()}
 
         {/* Deadlines */}
         <div className="space-y-2">
@@ -297,6 +303,8 @@ function DeadlineRow({ label, date, status }: { label: string; date: Date; statu
     normal: "",
     past: "",
   }
+
+  if (!isValid(date)) return null
 
   return (
     <div className="flex items-center justify-between text-sm">

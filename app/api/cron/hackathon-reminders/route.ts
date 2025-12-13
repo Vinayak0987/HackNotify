@@ -74,7 +74,8 @@ export async function GET(request: Request) {
             .eq("team_id", hackathon.team_id)
 
           for (const member of members || []) {
-            const profile = member.profile as Profile
+            const profileRaw = (member as any).profile
+            const profile = (Array.isArray(profileRaw) ? profileRaw[0] : profileRaw) as Profile | null
             if (profile?.notifications_email && profile?.email) {
               // Check if we already sent this reminder today
               const { data: existingLog } = await supabase
@@ -114,7 +115,8 @@ export async function GET(request: Request) {
             .eq("team_id", hackathon.team_id)
 
           for (const member of members || []) {
-            const profile = member.profile as Profile
+            const profileRaw = (member as any).profile
+            const profile = (Array.isArray(profileRaw) ? profileRaw[0] : profileRaw) as Profile | null
             if (profile?.notifications_email && profile?.email) {
               const { data: existingLog } = await supabase
                 .from("notification_logs")

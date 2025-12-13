@@ -8,7 +8,7 @@ import { Sidebar } from "@/components/dashboard/sidebar"
 import { MobileNav } from "@/components/dashboard/mobile-nav"
 import { Header } from "@/components/dashboard/header"
 
-type UserHeader = { email?: string | null; name?: string | null }
+type UserHeader = { email?: string; name?: string }
 
 export default function DashboardLayout({
   children,
@@ -29,7 +29,10 @@ export default function DashboardLayout({
         router.replace("/auth/login")
         return
       }
-      setUser({ email: sessionUser.email, name: (sessionUser.user_metadata as any)?.name })
+      setUser({
+        email: sessionUser.email ?? undefined,
+        name: typeof (sessionUser.user_metadata as any)?.name === "string" ? (sessionUser.user_metadata as any).name : undefined,
+      })
       setIsReady(true)
     })
 
@@ -42,7 +45,10 @@ export default function DashboardLayout({
         router.replace("/auth/login")
         return
       }
-      setUser({ email: sessionUser.email, name: (sessionUser.user_metadata as any)?.name })
+      setUser({
+        email: sessionUser.email ?? undefined,
+        name: typeof (sessionUser.user_metadata as any)?.name === "string" ? (sessionUser.user_metadata as any).name : undefined,
+      })
       setIsReady(true)
     })
 

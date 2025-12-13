@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,7 +18,7 @@ type TeamMember = {
     user_id: string
     role: "admin" | "member"
     joined_at: string
-    profiles: Profile
+    profiles: Profile | null
 }
 
 export default function TeamSettingsPage() {
@@ -31,13 +31,9 @@ export default function TeamSettingsPage() {
     const [saving, setSaving] = useState(false)
 
     const router = useRouter()
-    const supabase = createClient()
+    const supabase = useMemo(() => createClient(), [])
 
-    useEffect(() => {
-        fetchTeamData()
-    }, [])
-
-    const fetchTeamData = async () => {
+    const fetchTeamData = useCallback(async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser()
             if (!user) {
@@ -83,7 +79,7 @@ export default function TeamSettingsPage() {
         `)
                 .eq("team_id", teamMember.team_id)
 
-            setMembers(members as any || []) // Type casting for ease
+            setMembers(((members as unknown) as TeamMember[]) || [])
 
         } catch (error) {
             console.error("Error loading settings:", error)
@@ -91,7 +87,11 @@ export default function TeamSettingsPage() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [router, supabase])
+
+    useEffect(() => {
+        fetchTeamData()
+    }, [fetchTeamData])
 
     const handleUpdateName = async () => {
         if (!teamName.trim()) return
@@ -199,30 +199,36 @@ export default function TeamSettingsPage() {
                 </CardHeader>
                 <CardContent>
                     <div className="space-y-4">
-                        {members.map((member) => (
-                            <div key={member.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                                <div className="flex items-center gap-3">
-                                    <Avatar>
-                                        <AvatarFallback>{member.profiles.name?.slice(0, 2).toUpperCase()}</AvatarFallback>
-                                    </Avatar>
-                                    <div>
-                                        <p className="font-medium text-sm">{member.profiles.name}</p>
-                                        <p className="text-xs text-muted-foreground">{member.profiles.email}</p>
+                        {members.map((member) => {
+                            const name = member.profiles?.name || "Unknown"
+                            const initials = (name.slice(0, 2) || "??").toUpperCase()
+                            const email = member.profiles?.email || ""
+
+                            return (
+                                <div key={member.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        <Avatar>
+                                            <AvatarFallback>{initials}</AvatarFallback>
+                                        </Avatar>
+                                        <div>
+                                            <p className="font-medium text-sm">{name}</p>
+                                            {email && <p className="text-xs text-muted-foreground">{email}</p>}
+                                        </div>
+                                        {member.role === 'admin' && <Badge variant="secondary" className="text-xs">Admin</Badge>}
                                     </div>
-                                    {member.role === 'admin' && <Badge variant="secondary" className="text-xs">Admin</Badge>}
+                                    {isAdmin && member.user_id !== currentUserId && (
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="text-destructive hover:bg-destructive/10"
+                                            onClick={() => handleRemoveMember(member.user_id)}
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                    )}
                                 </div>
-                                {isAdmin && member.user_id !== currentUserId && (
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="text-destructive hover:bg-destructive/10"
-                                        onClick={() => handleRemoveMember(member.user_id)}
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </Button>
-                                )}
-                            </div>
-                        ))}
+                            )
+                        })}
                     </div>
                 </CardContent>
             </Card>

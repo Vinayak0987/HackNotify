@@ -35,26 +35,70 @@ export default function LoginPage() {
       // Ensure Server Components see the updated auth cookies.
       router.refresh()
 
-      // Pre-cache core routes right after login so offline works without manual visiting.
-      try {
-        if ("serviceWorker" in navigator) {
+      // Pre-cache routes right after login so offline works without manual visiting.
+      // Includes all task/hackathon detail routes for the teams the user belongs to.
+      ;(async () => {
+        try {
+          if (!("serviceWorker" in navigator)) return
           const reg = await navigator.serviceWorker.ready
-          reg.active?.postMessage({
-            type: "PRECACHE_URLS",
-            urls: [
-              "/",
-              "/dashboard",
-              "/tasks",
-              "/hackathons",
-              "/calendar",
-              "/team",
-              "/settings",
-            ],
-          })
+          const post = (urls: string[]) =>
+            reg.active?.postMessage({
+              type: "PRECACHE_URLS",
+              urls,
+            })
+
+          // Always precache core routes.
+          const core = ["/", "/dashboard", "/tasks", "/hackathons", "/calendar", "/team", "/settings"]
+          post(core)
+
+          // Get user + teams
+          const {
+            data: { session },
+          } = await supabase.auth.getSession()
+          const user = session?.user
+          if (!user) return
+
+          const { data: teamMembers } = await supabase.from("team_members").select("team_id").eq("user_id", user.id)
+          const teamIds = teamMembers?.map((tm: any) => tm.team_id) || []
+          if (teamIds.length === 0) return
+
+          const PAGE_SIZE = 500
+
+          async function fetchAllIds(table: "tasks" | "hackathons") {
+            const ids: string[] = []
+            let from = 0
+            while (true) {
+              const to = from + PAGE_SIZE - 1
+              const { data, error } = await supabase
+                .from(table)
+                .select("id")
+                .in("team_id", teamIds)
+                .range(from, to)
+
+              if (error) break
+              const batch = (data || []).map((r: any) => r.id).filter(Boolean)
+              ids.push(...batch)
+              if (batch.length < PAGE_SIZE) break
+              from += PAGE_SIZE
+            }
+            return ids
+          }
+
+          const [taskIds, hackathonIds] = await Promise.all([fetchAllIds("tasks"), fetchAllIds("hackathons")])
+
+          // Send in chunks to avoid large messages.
+          const urls: string[] = []
+          for (const id of taskIds) urls.push(`/tasks/${id}`)
+          for (const id of hackathonIds) urls.push(`/hackathons/${id}`)
+
+          const CHUNK = 150
+          for (let i = 0; i < urls.length; i += CHUNK) {
+            post(urls.slice(i, i + CHUNK))
+          }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
-      }
+      })()
 
       router.push("/dashboard")
     } catch (error: unknown) {
